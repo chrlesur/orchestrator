@@ -63,7 +63,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newJob, err := s.jobManager.CreateJob(jobReq.Command, jobReq.Args, "")
+	newJob, err := s.jobManager.CreateJob(jobReq.ID, jobReq.Command, jobReq.Args, "")
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return

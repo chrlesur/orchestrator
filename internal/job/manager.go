@@ -51,24 +51,25 @@ func NewManager(workerCount int, store *db.Store, defaultTimeout time.Duration, 
 	return m
 }
 
-func (m *Manager) CreateJob(command string, args []string, pluginName string) (*models.Job, error) {
-	id := utils.GenerateID(8)
-	job := &models.Job{
-		ID:         id,
-		Command:    command,
-		Args:       args,
-		PluginName: pluginName,
-		Status:     models.JobStatusPending,
-		Timeout:    m.defaultTimeout,
-		MaxRetries: m.maxRetries,
-	}
+func (m *Manager) CreateJob(name, command string, args []string, pluginName string) (*models.Job, error) {
+    id := utils.GenerateID(8)
+    job := &models.Job{
+        ID:         id,
+        Name:       name,
+        Command:    command,
+        Args:       args,
+        PluginName: pluginName,
+        Status:     models.JobStatusPending,
+        Timeout:    m.defaultTimeout,
+        MaxRetries: m.maxRetries,
+    }
 
-	err := m.AddJob(job)
-	if err != nil {
-		return nil, err
-	}
+    err := m.AddJob(job)
+    if err != nil {
+        return nil, err
+    }
 
-	return job, nil
+    return job, nil
 }
 
 func (m *Manager) AddJob(job *models.Job) error {

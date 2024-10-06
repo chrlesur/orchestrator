@@ -24,11 +24,12 @@ type LogEntry struct {
 }
 
 var (
-	logFile    *os.File
-	logEntries []LogEntry
-	mu         sync.Mutex
-	logLevel   LogLevel
-	logger     *log.Logger
+	logFile         *os.File
+	logEntries      []LogEntry
+	mu              sync.Mutex
+	logLevel        LogLevel
+	logger          *log.Logger
+	currentLogLevel LogLevel
 )
 
 func Init(level string, filePath string) error {
@@ -52,11 +53,12 @@ func Init(level string, filePath string) error {
 	}
 
 	logger = log.New(logFile, "", log.LstdFlags)
+	currentLogLevel = logLevel
 	return nil
 }
 
 func logMessage(level LogLevel, message string) {
-	if level < logLevel {
+	if level < currentLogLevel {
 		return
 	}
 
@@ -120,4 +122,19 @@ func getLevelString(level LogLevel) string {
 
 func GetLevelString(level LogLevel) string {
 	return getLevelString(level)
+}
+
+// SetLogLevel permet de changer le niveau de log en cours d'exécution
+func SetLogLevel(level LogLevel) {
+	mu.Lock()
+	defer mu.Unlock()
+	currentLogLevel = level
+	logger.Printf("Log level changed to %s", getLevelString(level))
+}
+
+// GetCurrentLogLevel retourne le niveau de log actuel
+func GetCurrentLogLevel() LogLevel {
+	mu.Lock()
+	defer mu.Unlock()
+	return currentLogLevel
 }

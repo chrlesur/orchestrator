@@ -21,6 +21,7 @@ const (
 
 type Job struct {
 	ID         string
+	Name       string 
 	Command    string
 	Args       []string
 	Timeout    time.Duration

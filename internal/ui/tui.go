@@ -16,17 +16,18 @@ import (
 )
 
 type TUI struct {
-	app             *tview.Application
-	jobManager      *job.Manager
-	pipelineManager *pipeline.Manager
-	pluginManager   *plugin.PluginManager
-	jobList         *tview.List
-	pipelineList    *tview.List
-	logView         *tview.TextView
-	detailView      *tview.TextView
-	statsView       *tview.TextView
-	inputField      *tview.InputField
-	logLevel        logger.LogLevel
+	app              *tview.Application
+	jobManager       *job.Manager
+	pipelineManager  *pipeline.Manager
+	pluginManager    *plugin.PluginManager
+	jobList          *tview.List
+	pipelineList     *tview.List
+	logView          *tview.TextView
+	detailView       *tview.TextView
+	statsView        *tview.TextView
+	inputField       *tview.InputField
+	logLevel         logger.LogLevel
+	logLevelDropDown *tview.DropDown
 }
 
 func NewTUI(jobManager *job.Manager, pipelineManager *pipeline.Manager, pluginManager *plugin.PluginManager) *TUI {
@@ -50,53 +51,93 @@ func NewTUI(jobManager *job.Manager, pipelineManager *pipeline.Manager, pluginMa
 }
 
 func (t *TUI) setupUI() {
+	// Configuration des différentes vues
 	t.jobList.SetTitle("Jobs").SetBorder(true).SetTitleColor(tcell.ColorGreen)
 	t.pipelineList.SetTitle("Pipelines").SetBorder(true).SetTitleColor(tcell.ColorBlue)
 	t.logView.SetTitle("Logs").SetBorder(true).SetTitleColor(tcell.ColorYellow)
 	t.detailView.SetTitle("Details").SetBorder(true).SetTitleColor(tcell.GetColor("#FF00FF"))   // Magenta
 	t.statsView.SetTitle("Statistics").SetBorder(true).SetTitleColor(tcell.GetColor("#00FFFF")) // Cyan
 
+	// Configuration des fonctions de sélection
 	t.jobList.SetSelectedFunc(t.showJobDetails)
 	t.pipelineList.SetSelectedFunc(t.showPipelineDetails)
-	t.inputField.SetDoneFunc(t.handleCommand)
 
-	logMenu := tview.NewDropDown().
+	// Configuration de l'input field
+	t.inputField.SetLabel("Command: ").SetFieldWidth(0)
+	t.inputField.SetDoneFunc(t.handleCommand)
+	t.inputField.SetChangedFunc(func(text string) {
+		if text == "" {
+			t.showHelp()
+		}
+	})
+
+	// Configuration du menu déroulant pour le niveau de log
+	t.logLevelDropDown = tview.NewDropDown().
 		SetLabel("Log Level: ").
 		SetOptions([]string{"DEBUG", "INFO", "WARNING", "ERROR"}, t.setLogLevel)
+	t.updateLogLevelDisplay() // Initialise l'affichage du niveau de log
 
+	// Configuration de la liste des plugins
 	pluginMenu := tview.NewList().ShowSecondaryText(false)
 	for _, pluginName := range t.pluginManager.GetLoadedPlugins() {
 		pluginMenu.AddItem(pluginName, "", 0, nil)
 	}
 	pluginMenu.SetTitle("Plugins").SetBorder(true)
 
+	// Organisation de l'interface
 	leftPane := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(t.jobList, 0, 1, false).
-		AddItem(t.pipelineList, 0, 1, false).
+		AddItem(t.jobList, 0, 4, false).
+		AddItem(t.pipelineList, 0, 4, false).
 		AddItem(pluginMenu, 0, 1, false)
 
 	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(t.detailView, 0, 2, false).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(logMenu, 1, 0, false).
-			AddItem(t.logView, 0, 1, false), 0, 2, false).
-		AddItem(t.statsView, 6, 0, false)
+			AddItem(t.logLevelDropDown, 1, 0, false).
+			AddItem(t.logView, 0, 7, false), 0, 7, false).
+		AddItem(t.statsView, 0, 1, false)
 
 	mainFlex := tview.NewFlex().
-		AddItem(leftPane, 0, 1, false).
+		AddItem(leftPane, 0, 3, false).
 		AddItem(rightPane, 0, 2, false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(mainFlex, 0, 1, false).
-		AddItem(t.inputField, 1, 0, false)
+		AddItem(t.inputField, 1, 0, true)
 
-	t.app.SetRoot(root, true).SetFocus(t.jobList)
+	// Configuration de l'application
+	t.app.SetRoot(root, true).SetFocus(t.inputField)
+
+	// Ajout d'un gestionnaire d'événements global pour les touches
+	t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyTab:
+			// Changement de focus entre les éléments principaux
+			if t.app.GetFocus() == t.inputField {
+				t.app.SetFocus(t.jobList)
+			} else if t.app.GetFocus() == t.jobList {
+				t.app.SetFocus(t.pipelineList)
+			} else {
+				t.app.SetFocus(t.inputField)
+			}
+			return nil
+		case tcell.KeyCtrlC:
+			// Quitter l'application
+			t.app.Stop()
+			return nil
+		}
+		return event
+	})
+
+	// Message d'accueil
+	t.detailView.SetText("Welcome to the Orchestrator. Type 'help' to see available commands.")
+	logger.Info(fmt.Sprintf("Welcome to the Orchestrator"))
 }
 
 func (t *TUI) updateJobList() {
 	t.jobList.Clear()
 	for _, job := range t.jobManager.GetJobs() {
-		t.jobList.AddItem(fmt.Sprintf("%s - %s", job.ID, job.Status), "", 0, nil)
+		t.jobList.AddItem(fmt.Sprintf("%s - %s (%s)", job.Name, job.ID, job.Status), "", 0, nil)
 	}
 }
 
@@ -108,15 +149,19 @@ func (t *TUI) updatePipelineList() {
 }
 
 func (t *TUI) showJobDetails(index int, mainText string, secondaryText string, shortcut rune) {
-	jobID := strings.Split(mainText, " - ")[0]
+	parts := strings.SplitN(mainText, " - ", 2)
+	if len(parts) < 2 {
+		return
+	}
+	jobID := strings.TrimSpace(strings.Split(parts[1], " ")[0])
 	job, err := t.jobManager.GetJob(jobID)
 	if err != nil {
 		t.detailView.SetText(fmt.Sprintf("Error: %v", err))
 		return
 	}
 
-	details := fmt.Sprintf("Job ID: %s\nStatus: %s\nCommand: %s\nArgs: %v\nStart Time: %s\nEnd Time: %s\nResult: %s\nError: %v",
-		job.ID, job.Status, job.Command, job.Args, job.StartTime, job.EndTime, job.Result, job.Error)
+	details := fmt.Sprintf("Job Name: %s\nJob ID: %s\nStatus: %s\nCommand: %s\nArgs: %v\nStart Time: %s\nEnd Time: %s\nResult: %s\nError: %v",
+		job.Name, job.ID, job.Status, job.Command, job.Args, job.StartTime, job.EndTime, job.Result, job.Error)
 	t.detailView.SetText(details)
 }
 
@@ -147,32 +192,39 @@ func (t *TUI) handleCommand(key tcell.Key) {
 	}
 
 	switch parts[0] {
+	case "help":
+		t.showHelp()
 	case "addjob":
 		t.handleAddJob(parts[1:])
 	case "addpipeline":
 		t.handleAddPipeline(parts[1:])
 	case "executeplugin":
 		t.handleExecutePlugin(parts[1:])
+	case "setloglevel":
+		t.handleSetLogLevel(parts[1:])
 	default:
-		logger.Info(fmt.Sprintf("Unknown command: %s", parts[0]))
+		logger.Info(fmt.Sprintf("Unknown command: %s. Type 'help' for available commands.", parts[0]))
+		t.detailView.SetText(fmt.Sprintf("Unknown command: %s. Type 'help' for available commands.", parts[0]))
 	}
 }
 
 func (t *TUI) handleAddJob(args []string) {
 	if len(args) < 3 {
-		logger.Info("Usage: addjob <id> <command> <arg1> <arg2> ...")
+		t.detailView.SetText("Usage: addjob <name> <command> <arg1> <arg2> ...")
 		return
 	}
 
-	id := args[0]
+	name := args[0]
 	command := args[1]
 	jobArgs := args[2:]
 
-	_, err := t.jobManager.CreateJob(command, jobArgs, "")
+	job, err := t.jobManager.CreateJob(name, command, jobArgs, "")
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error adding job: %v", err))
+		t.detailView.SetText(fmt.Sprintf("Error adding job: %v", err))
 	} else {
-		logger.Info(fmt.Sprintf("Job added: %s", id))
+		logger.Info(fmt.Sprintf("Job added: %s (ID: %s)", name, job.ID))
+		t.detailView.SetText(fmt.Sprintf("Job added successfully: %s (ID: %s)", name, job.ID))
 		t.updateJobList()
 	}
 }
@@ -233,18 +285,39 @@ func (t *TUI) handleExecutePlugin(args []string) {
 	}
 }
 
+func (t *TUI) showHelp() {
+	helpText := `Available commands:
+    help - Display this help message
+    addjob <name> <command> <arg1> <arg2> ... - Add a new job
+    addpipeline <id> <name> <job1> <job2> ... - Add a new pipeline
+    executeplugin <plugin_name> <arg1> <arg2> ... - Execute a plugin
+    setloglevel <DEBUG|INFO|WARNING|ERROR> - Set the log level`
+
+	t.detailView.SetText(helpText)
+}
+
 func (t *TUI) setLogLevel(text string, index int) {
+	var newLevel logger.LogLevel
 	switch text {
 	case "DEBUG":
-		t.logLevel = logger.DEBUG
+		newLevel = logger.DEBUG
 	case "INFO":
-		t.logLevel = logger.INFO
+		newLevel = logger.INFO
 	case "WARNING":
-		t.logLevel = logger.WARNING
+		newLevel = logger.WARNING
 	case "ERROR":
-		t.logLevel = logger.ERROR
+		newLevel = logger.ERROR
+	default:
+		return
 	}
-	t.updateLogs()
+
+	logger.SetLogLevel(newLevel)
+}
+
+func (t *TUI) updateLogLevelDisplay() {
+	currentLevel := logger.GetCurrentLogLevel()
+	levelString := logger.GetLevelString(currentLevel)
+	t.logLevelDropDown.SetLabel(fmt.Sprintf("Log Level (%s): ", levelString))
 }
 
 func (t *TUI) updateLogs() {
@@ -314,10 +387,38 @@ func (t *TUI) Run() error {
 				t.updatePipelineList()
 				t.updateLogs()
 				t.updateStats()
+				t.updateLogLevelDisplay()
 			})
 			time.Sleep(5 * time.Second)
 		}
 	}()
 
 	return t.app.Run()
+}
+
+func (t *TUI) handleSetLogLevel(args []string) {
+	if len(args) != 1 {
+		t.detailView.SetText("Usage: setloglevel <DEBUG|INFO|WARNING|ERROR>")
+		return
+	}
+
+	level := strings.ToUpper(args[0])
+	var newLevel logger.LogLevel
+	switch level {
+	case "DEBUG":
+		newLevel = logger.DEBUG
+	case "INFO":
+		newLevel = logger.INFO
+	case "WARNING":
+		newLevel = logger.WARNING
+	case "ERROR":
+		newLevel = logger.ERROR
+	default:
+		t.detailView.SetText("Invalid log level. Use DEBUG, INFO, WARNING, or ERROR.")
+		return
+	}
+
+	logger.SetLogLevel(newLevel)
+	t.updateLogLevelDisplay()
+	t.detailView.SetText(fmt.Sprintf("Log level set to %s", level))
 }
