@@ -1,0 +1,34 @@
+graph TD
+    subgraph "Client"
+        CLI[CLI Application]
+        CLI --> CCobra[Cobra Command Handler]
+        CLI --> CConfig[Config Manager]
+        CLI --> CLogging[Logging System]
+    end
+
+    subgraph "Server"
+        API[API REST]
+        API --> Cobra[Cobra Command Handler]
+        Cobra --> CoreService[Core Service]
+        CoreService --> JobManager[Job Manager]
+        CoreService --> PipelineManager[Pipeline Manager]
+        CoreService --> ScheduleManager[Schedule Manager]
+        CoreService --> ContextManager[Context Manager]
+        CoreService --> ResourceManager[Resource Manager]
+        CoreService --> Config[Config Manager]
+        CoreService --> Logging[Logging System]
+        
+        Database[(BoltDB)] --> CoreService
+        
+        subgraph "Execution"
+            JobExecutor[Job Executor]
+        end
+        
+        JobManager --> JobExecutor
+        PipelineManager --> JobExecutor
+        ScheduleManager --> JobExecutor
+    end
+
+    CLI -.-> API
+    
+    WebUI[Web UI] -.-> API
